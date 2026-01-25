@@ -20,7 +20,7 @@ wandb/
 
 # Datos
 data/
-datasets/
+
 
 # OS
 .DS_Store
