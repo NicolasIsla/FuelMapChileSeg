@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Entornos
+.env
+.venv/
+venv/
+
+# Logs y outputs
+logs/
+results/
+outputs/
+wandb/
+
+# Modelos
+*.pth
+*.ckpt
+
+# Datos
+data/
+datasets/
+
+# OS
+.DS_Store
+Thumbs.dbs
