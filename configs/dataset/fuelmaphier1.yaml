@@ -1,7 +1,7 @@
 # configs/dataset/fuelmap.yaml
-_target_: shapeft.datasets.fuelmap.FuelMap
+_target_: shapeft.datasets.fuelmap_grouped.FuelMap
 
-dataset_name: FuelMap
+dataset_name: FuelMapHier1
 root_path: /data/nisla/fuel_map_chile3/
 download_url: ""
 auto_download: false
@@ -12,7 +12,7 @@ multi_modal: true
 obj: segmentation            # consistent string
 
 ignore_index: 0            # not used in regression; mask is separate
-num_classes: 33
+num_classes: 7
 
 bands:
   optical:                 # make sure order matches your saved arrays
@@ -41,75 +41,25 @@ bands:
   landforms:
     - landforms
 
-classes: 
+
+
+classes:
   - Background
-  - PL10
-  - PL09
-  - PL11
-  - SV02
-  - MT03
-  - PL08
-  - PL05
-  - PL04
-  - PL02
-  - SV01
-  - PCH4
-  - PCH2
-  - MT01
-  - PCH1
-  - PL01
-  - SV03
-  - MT02 
-  - DX02
-  - BN05
-  - BN04
-  - MT04
-  - MT07
-  - MT06
-  - PL07
-  - PCH5
-  - PL03
-  - DX01
-  - BN03
-  - PL06
-  - PCH3
-  - BN01
-  - MT08  
+  - BN
+  - DX
+  - MT
+  - PCH
+  - PL
+  - SV
 
 distribution:
-  - 0.5846
-  - 0.0167
-  - 0.0140
-  - 0.0321
-  - 0.0124
-  - 0.0024
-  - 0.0055
-  - 0.0101
-  - 0.0195
-  - 0.0235
-  - 0.0132
-  - 0.0020
-  - 0.0125
-  - 0.0061
-  - 0.0024
-  - 0.0320
-  - 0.0256
-  - 0.0097
-  - 0.0003
-  - 0.0016
-  - 0.0093
-  - 0.0018
-  - 0.0023
-  - 0.0275
-  - 0.0183
-  - 0.0313
-  - 0.0214
-  - 0.0043
-  - 0.0316
-  - 0.0186
-  - 0.0060
-  - 0.0003
-  - 0.0011
+  - 0.584633   # Background
+  - 0.042734   # BN
+  - 0.004612   # DX
+  - 0.050954   # MT
+  - 0.054205   # PCH
+  - 0.211718   # PL
+  - 0.051144   # SV
 
 data_mean:
   optical:
