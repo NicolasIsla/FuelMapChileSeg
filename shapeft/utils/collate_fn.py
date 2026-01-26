@@ -1,33 +1,17 @@
 from typing import Callable
-
 import torch
 import torch.nn.functional as F
 
-
 def get_collate_fn(modalities: list[str]) -> Callable:
-    def collate_fn(
-        batch: list[dict[str, dict[str, torch.Tensor] | torch.Tensor]],
-    ) -> dict[str, dict[str, torch.Tensor] | torch.Tensor]:
-        """Collate function for torch DataLoader
-        
-        Args:
-            batch: list of dictionaries with keys 'image', 'target', and optionally 'dates'.
-                   'image' is a dict with keys corresponding to modalities and values being torch.Tensor.
-                   For single images: shape (C, H, W), for time series: (C, T, H, W).
-                   'target' is a torch.Tensor.
-                   'metadata' is a torch.Tensor.
-        Returns:
-            A dictionary with keys 'image', 'target', and 'metadata'.
-        """
-        # Compute maximum temporal dimension across modalities for time series images
+    def collate_fn(batch):
+        # 1) T_max
         T_max = 0
         for modality in modalities:
             for x in batch:
-                # Check if the image is a time series (has 4 dimensions)
                 if len(x["image"][modality].shape) == 4:
                     T_max = max(T_max, x["image"][modality].shape[1])
-                    
-        # Pad all images to the same temporal dimension if needed
+
+        # 2) pad temporal
         for modality in modalities:
             for i, x in enumerate(batch):
                 if len(x["image"][modality].shape) == 4:
@@ -38,7 +22,7 @@ def get_collate_fn(modalities: list[str]) -> Callable:
                             x["image"][modality], padding, "constant", 0
                         )
 
-        # Build the batch dictionary for images and target
+        # 3) build out
         batch_out = {
             "image": {
                 modality: torch.stack([x["image"][modality] for x in batch])
@@ -47,8 +31,12 @@ def get_collate_fn(modalities: list[str]) -> Callable:
             "target": torch.stack([x["target"] for x in batch]),
             "metadata": torch.stack([x["metadata"] for x in batch]),
         }
-        
+
+        # 4) add mask if present
+        if "mask" in batch[0]:
+            # acepta (H,W) o (1,H,W); apila a (B,...) tal cual
+            batch_out["mask"] = torch.stack([x["mask"] for x in batch])
+
         return batch_out
 
     return collate_fn
-

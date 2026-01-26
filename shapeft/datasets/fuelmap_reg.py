@@ -1,14 +1,11 @@
-###
-# FuelMap dataset in the same spirit as the PASTIS dataset implementation
-# (OmniSat / PASTIS-HD style): build an intermediate `output` dict, then
-# rearrange temporal modalities to (C,T,H,W), temporal subsampling, and
-# return a structured dict with {"image":..., "target":..., "metadata":...}.
-###
+# FuelMap dataset (PASTIS-like) adapted for REGRESSION with 3 targets per pixel:
+# target = stack([r_norm, H_norm, w_norm]) -> (3, H, W)
+# plus mask (0/1) loaded from ANNOTATIONS_mask/{id}.npy
 
 import json
 import os
 from datetime import datetime
-from typing import Dict, Union, Optional
+from typing import Dict, Union
 
 import geopandas as gpd
 import numpy as np
@@ -20,7 +17,6 @@ from shapeft.datasets.base import RawGeoFMDataset, temporal_subsampling
 
 
 def prepare_dates(date_dict, reference_date):
-    """Date formatting: dict/json -> tensor(days since ref)."""
     if isinstance(date_dict, str):
         date_dict = json.loads(date_dict)
     d = pd.DataFrame().from_dict(date_dict, orient="index")
@@ -35,21 +31,12 @@ def prepare_dates(date_dict, reference_date):
 
 class FuelMap(RawGeoFMDataset):
     """
-    Multi-modal, multi-temporal dataset.
-
     Return format (PASTIS-like):
     {
-      "image": {
-        "optical":  (C,T,H,W) float32,
-        "sar_asc":  (C,T,H,W) float32,
-        "sar_desc": (C,T,H,W) float32,
-        "elevation":(C,1,H,W) float32,   # static with T=1
-        "mTPI":     (C,1,H,W) float32,   # static with T=1
-        "landforms":(C,1,H,W) float32,   # static with T=1
-      },
-      "target":  (4,H,W) float32  (or torch tensor),
-      "metadata": (T,) long  (S2 dates offsets aligned with optical selection),
-      "mask": (H,W) or (1,H,W) bool/int (as stored; recommended bool)
+      "image": { ... },
+      "target":  (3,H,W) float32   # [r_norm, H_norm, w_norm]
+      "mask":    (H,W) uint8/bool  # 0 invalid, 1 valid
+      "metadata": (T,) long
     }
     """
 
@@ -74,8 +61,12 @@ class FuelMap(RawGeoFMDataset):
         auto_download: bool,
         reference_date: str = "2020-09-01",
         cover: int = 0,
-        obj: str = "regresion",
-        map_reg: str = "combustible_disponible",
+        obj: str = "regression",
+        # --- regression targets dirs (normalized) ---
+        ann_r_dir: str = "ANNOTATIONS_r_norm",
+        ann_h_dir: str = "ANNOTATIONS_H_norm",
+        ann_w_dir: str = "ANNOTATIONS_w_norm",
+        mask_dir: str = "ANNOTATIONS_mask",
     ):
         super().__init__(
             split=split,
@@ -106,38 +97,32 @@ class FuelMap(RawGeoFMDataset):
             folds = [5]
 
         self.obj = obj
-        self.map_reg = map_reg
         self.modalities = ["S2", "S1_asc", "S1_des", "elevation", "mTPI", "landforms"]
-
         self.reference_date = datetime(*map(int, reference_date.split("-")))
+
+        # target/mask folders (inside root_path)
+        self.ann_r_dir = ann_r_dir
+        self.ann_h_dir = ann_h_dir
+        self.ann_w_dir = ann_w_dir
+        self.mask_dir = mask_dir
 
         # metadata.geojson
         self.meta_patch = gpd.read_file(os.path.join(self.root_path, "metadata.geojson"))
         if cover > 0:
             self.meta_patch = self.meta_patch[self.meta_patch["cover"] > cover].copy()
 
-        # folds if missing
         if "Fold" not in self.meta_patch.columns:
             n = len(self.meta_patch)
             folds_auto = np.tile(np.arange(1, 6), n // 5 + 1)[:n]
             self.meta_patch["Fold"] = folds_auto
 
-        # apply folds
         self.meta_patch = pd.concat([self.meta_patch[self.meta_patch["Fold"] == f] for f in folds])
         self.meta_patch = self.meta_patch.sort_values("id").reset_index(drop=True)
-
-        # Build date lookups (same idea, but we will select by indices like Pastis)
-        # We keep raw lists in columns dates_S2 / dates_S1_asc / dates_S1_des.
-        # get_dates() parses them per patch.
-        # Nothing else needed here.
 
     def __len__(self):
         return len(self.meta_patch)
 
     def _load_temporal(self, root_path: str, modality: str, name: Union[int, str]) -> torch.Tensor:
-        """
-        Loads temporal array expected as (T,C,H,W) and returns torch float32.
-        """
         path = os.path.join(root_path, f"DATA_{modality}", f"{name}.npy")
         arr = np.load(path)
         if arr.ndim != 4:
@@ -145,32 +130,21 @@ class FuelMap(RawGeoFMDataset):
         return torch.from_numpy(arr).to(torch.float32)  # (T,C,H,W)
 
     def _load_static(self, root_path: str, modality: str, name: Union[int, str]) -> torch.Tensor:
-        """
-        Loads static array expected as (H,W) or (C,H,W). Returns torch float32.
-        Output shape: (C, T, H, W) where T = self.multi_temporal.
-        """
         path = os.path.join(root_path, f"DATA_{modality}", f"{name}.npy")
         arr = np.load(path)
         ten = torch.from_numpy(arr).to(torch.float32)
 
         if ten.ndim == 2:
-            # (H,W) -> (1,H,W)
-            ten = ten.unsqueeze(0)
+            ten = ten.unsqueeze(0)  # (1,H,W)
         elif ten.ndim == 3:
-            # already (C,H,W)
-            pass
+            pass  # (C,H,W)
         else:
             raise ValueError(f"{modality} expected (H,W) or (C,H,W), got {arr.shape} at {path}")
 
-        # (C,H,W) -> (C,1,H,W) -> (C,T,H,W)
-        ten = ten.unsqueeze(1).repeat(1, self.multi_temporal, 1, 1)
+        ten = ten.unsqueeze(1).repeat(1, self.multi_temporal, 1, 1)  # (C,T,H,W)
         return ten
 
     def _get_dates_from_row(self, row: pd.Series, sat: str) -> torch.Tensor:
-        """
-        Returns a tensor of day offsets for a given satellite (S2, S1_asc, S1_des),
-        aligned with the temporal stack length for that modality.
-        """
         col = f"dates_{sat}"
         date_str = row.get(col, None)
 
@@ -179,69 +153,84 @@ class FuelMap(RawGeoFMDataset):
 
         if isinstance(date_str, str):
             date_list = [d for d in date_str.split(",") if d]
-            offsets = [
-                (datetime.strptime(d, "%Y-%m-%d") - self.reference_date).days
-                for d in date_list
-            ]
+            offsets = [(datetime.strptime(d, "%Y-%m-%d") - self.reference_date).days for d in date_list]
             return torch.tensor(offsets, dtype=torch.int32)
 
-        # fallback if stored as something else
         raise ValueError(f"Unsupported date format for {col}: {type(date_str)}")
+
+    def _load_reg_targets_and_mask(self, name: Union[int, str]) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Loads:
+          r_norm, H_norm, w_norm as (H,W) each, stacks -> (3,H,W)
+          mask as (H,W) 0/1
+        """
+        r_path = os.path.join(self.root_path, self.ann_r_dir, f"{name}.npy")
+        h_path = os.path.join(self.root_path, self.ann_h_dir, f"{name}.npy")
+        w_path = os.path.join(self.root_path, self.ann_w_dir, f"{name}.npy")
+        m_path = os.path.join(self.root_path, self.mask_dir,  f"{name}.npy")
+
+        r = np.load(r_path).astype(np.float32)
+        h = np.load(h_path).astype(np.float32)
+        w = np.load(w_path).astype(np.float32)
+        mask = np.load(m_path)
+
+        if mask.ndim != 2:
+            raise ValueError(f"mask expected (H,W), got {mask.shape} at {m_path}")
+
+        # enforce 0/1
+        mask = (mask > 0).astype(np.uint8)
+
+        if r.shape != mask.shape or h.shape != mask.shape or w.shape != mask.shape:
+            raise ValueError(
+                f"Target/mask shape mismatch for id={name}: "
+                f"r{r.shape} h{h.shape} w{w.shape} mask{mask.shape}"
+            )
+
+        target = np.stack([r, h, w], axis=0)  # (3,H,W)
+
+        target_t = torch.from_numpy(target).to(torch.float32)
+        mask_t = torch.from_numpy(mask)  # uint8
+
+        return target_t, mask_t
 
     def __getitem__(self, i: int) -> Dict[str, Union[Dict[str, torch.Tensor], torch.Tensor]]:
         row = self.meta_patch.iloc[i]
         name = row["id"]
 
-        # ---- TARGET + MASK ----
-        target_np = np.load(os.path.join(self.root_path, "ANNOTATIONS_class", f"{name}.npy"))
+        # ---- TARGET (3,H,W) + MASK (H,W) ----
+        target, mask = self._load_reg_targets_and_mask(name)
 
-        # Convert to torch (recommended; if your pipeline expects numpy, remove these conversions)
-        target = torch.from_numpy(target_np).to(torch.int64)
-        mask_path = os.path.join(self.root_path, "ANNOTATIONS_masked", f"{name}_masked.npy")
-        if os.path.exists(mask_path):
-            mask_np = np.load(mask_path)
-            mask = torch.from_numpy(mask_np)
-        else:
-            mask = None  # o máscara todo válida: torch.ones((H,W), dtype=torch.bool)
-
-        # ---- Build output dict (PASTIS style) ----
+        # ---- Build output dict ----
         output: Dict[str, Union[torch.Tensor, int]] = {"name": int(name)}
 
-        # Temporal modalities loaded as (T,C,H,W)
         output["S2"] = self._load_temporal(self.root_path, "S2", name)
         output["S1_asc"] = self._load_temporal(self.root_path, "S1_asc", name)
         output["S1_des"] = self._load_temporal(self.root_path, "S1_des", name)
 
-        # Static modalities loaded as (C,1,H,W)
         output["elevation"] = self._load_static(self.root_path, "elevation", name)
         output["mTPI"] = self._load_static(self.root_path, "mTPI", name)
         output["landforms"] = self._load_static(self.root_path, "landforms", name)
 
-        # Dates (offsets) for temporal modalities
         output["S2_dates"] = self._get_dates_from_row(row, "S2")
         output["S1_asc_dates"] = self._get_dates_from_row(row, "S1_asc")
         output["S1_des_dates"] = self._get_dates_from_row(row, "S1_des")
 
-        # ---- Rearrange temporal to (C,T,H,W) ----
+        # ---- Rearrange to (C,T,H,W) ----
         optical_ts = rearrange(output["S2"], "t c h w -> c t h w")
         sar_asc_ts = rearrange(output["S1_asc"], "t c h w -> c t h w")
         sar_desc_ts = rearrange(output["S1_des"], "t c h w -> c t h w")
 
-        # ---- Temporal subsampling (PASTIS logic) ----
+        # ---- Temporal subsampling ----
         if self.multi_temporal == 1:
-            # take last frame
             idx = torch.tensor([-1], dtype=torch.long)
-
             optical_ts = optical_ts[:, idx]
             sar_asc_ts = sar_asc_ts[:, idx]
             sar_desc_ts = sar_desc_ts[:, idx]
 
-            # metadata aligned to S2 selection
             s2_dates = output["S2_dates"]
             metadata = s2_dates[idx].to(torch.long) if len(s2_dates) > 0 else torch.zeros((1,), dtype=torch.long)
 
         else:
-            # Choose up to 35 evenly spaced indices, then subsample to multi_temporal
             def _select_indexes(T: int) -> torch.Tensor:
                 max_steps = min(35, T)
                 whole = torch.linspace(0, T - 1, steps=max_steps, dtype=torch.long)
@@ -255,14 +244,12 @@ class FuelMap(RawGeoFMDataset):
             sar_asc_ts = sar_asc_ts[:, asc_idx]
             sar_desc_ts = sar_desc_ts[:, des_idx]
 
-            # metadata from S2 dates with SAME indices as optical selection
             s2_dates = output["S2_dates"]
             if len(s2_dates) > 0:
-                # If date count differs from frames, align defensively by min length
+                # align by the SAME indices as optical selection (defensive)
                 max_valid = min(len(s2_dates), optical_ts.shape[1])
                 metadata = s2_dates[:max_valid].to(torch.long)
                 if metadata.numel() != optical_ts.shape[1]:
-                    # pad/truncate to match T
                     if metadata.numel() < optical_ts.shape[1]:
                         pad = optical_ts.shape[1] - metadata.numel()
                         metadata = torch.cat([metadata, metadata.new_full((pad,), int(metadata[-1]))])
@@ -271,7 +258,6 @@ class FuelMap(RawGeoFMDataset):
             else:
                 metadata = torch.zeros((optical_ts.shape[1],), dtype=torch.long)
 
-        # ---- Static tensors already (C,1,H,W) ----
         elev = output["elevation"]
         mtpi = output["mTPI"]
         land = output["landforms"]
@@ -285,7 +271,8 @@ class FuelMap(RawGeoFMDataset):
                 "mTPI": mtpi.to(torch.float32),
                 "landforms": land.to(torch.float32),
             },
-            "target": target,
+            "target": target,   # (3,H,W) float32
+            "mask": mask,       # (H,W) uint8 (0/1)
             "metadata": metadata,
         }
 

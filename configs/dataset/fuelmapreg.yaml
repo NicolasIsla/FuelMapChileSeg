@@ -1,5 +1,5 @@
 # configs/dataset/fuelmap.yaml
-_target_: shapeft.datasets.fuelmap.FuelMap
+_target_: shapeft.datasets.fuelmap_reg.FuelMap
 
 dataset_name: FuelMap
 root_path: /data/nisla/fuel_map_chile3/
@@ -9,10 +9,10 @@ auto_download: false
 img_size: 128
 multi_temporal: 35         # must be one of [1,6,15,25,35]
 multi_modal: true
-obj: segmentation            # consistent string
+obj: regression            # consistent string
 
 ignore_index: 0            # not used in regression; mask is separate
-num_classes: 33
+num_classes: 3
 
 bands:
   optical:                 # make sure order matches your saved arrays

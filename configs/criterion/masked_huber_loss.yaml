@@ -1,0 +1,2 @@
+_target_: shapeft.utils.losses.MaskedHuberLoss
+beta: 1.0

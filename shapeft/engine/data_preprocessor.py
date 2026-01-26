@@ -34,9 +34,9 @@ class BasePreprocessor:
                     f"Image dimension must be 4 (C, T, H, W), Got {str(len(v.shape))}"
                 )
 
-        if len(data["target"].shape) != 2:
+        if data["target"].ndim not in (2, 3):
             raise AssertionError(
-                f"Target dimension must be 2 (H, W), Got {str(len(data['target'].shape))}"
+                f"Target dimension must be 2 (H,W) or 3 (C,H,W), got {data['target'].shape}"
             )
 
     def check_size(self, data: dict[str, torch.Tensor | dict[str, torch.Tensor]]):
@@ -502,7 +502,20 @@ class RandomCrop(BasePreprocessor):
         for k, v in data["image"].items():
             data["image"][k] = TF.crop(v, i, j, h, w)
 
-        data["target"] = TF.crop(data["target"], i, j, h, w)
+        #data["target"] = TF.crop(data["target"], i, j, h, w)
+
+        if data["target"].ndim == 2:
+            data["target"] = TF.crop(data["target"], i, j, h, w)
+        elif data["target"].ndim == 3:
+            data["target"] = TF.crop(data["target"], i, j, h, w)  # CHW
+        else:
+            raise ValueError(...)
+            
+        if "mask" in data and data["mask"] is not None:
+            if data["mask"].ndim == 2:
+                data["mask"] = TF.crop(data["mask"], i, j, h, w)
+            elif data["mask"].ndim == 3:
+                data["mask"] = TF.crop(data["mask"], i, j, h, w)
 
         return data
 

@@ -127,36 +127,31 @@ class Trainer:
         torch.cuda.empty_cache()
 
     def train_one_epoch(self, epoch: int) -> None:
-        self.model.train()
-        end_time = time.time()
+        """Train model for one epoch.
 
+        Args:
+            epoch (int): number of the epoch.
+        """
+        self.model.train()
+
+        end_time = time.time()
         for batch_idx, data in enumerate(self.train_loader):
             image, target = data["image"], data["target"]
-            mask = data.get("mask", None)
-
-            image = {m: v.to(self.device) for m, v in image.items()}
+            image = {modality: value.to(self.device) for modality, value in image.items()}
             target = target.to(self.device)
-            if mask is not None:
-                mask = mask.to(self.device)
 
             self.training_stats["data_time"].update(time.time() - end_time)
 
-            # ----- forward + loss (AMP) -----
-            with torch.autocast("cuda", enabled=self.enable_mixed_precision, dtype=self.precision):
+            with torch.autocast(
+                "cuda", enabled=self.enable_mixed_precision, dtype=self.precision
+            ):
                 if self.model.module.encoder.model_name != "utae_encoder":
                     logits = self.model(image, output_shape=target.shape[-2:])
-                else:
+                else: 
                     logits = self.model(image, batch_positions=data["metadata"])
+                loss = self.compute_loss(logits, target)
 
-                if isinstance(self, RegTrainer):
-                    if mask is None:
-                        raise KeyError("RegTrainer requires 'mask' in the batch, but it was not provided.")
-                    loss = self.compute_loss(logits, target, mask)
-                else:
-                    loss = self.compute_loss(logits, target)
-
-            # ----- backward/step -----
-            self.optimizer.zero_grad(set_to_none=True)
+            self.optimizer.zero_grad()
 
             if not torch.isfinite(loss):
                 raise FloatingPointError(
@@ -166,16 +161,9 @@ class Trainer:
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer)
             self.scaler.update()
-
-            self.training_stats["loss"].update(loss.item())
-
-            # ----- metrics (NO AMP) -----
+            self.training_stats['loss'].update(loss.item())
             with torch.no_grad():
-                if isinstance(self, RegTrainer):
-                    self.compute_logging_metrics(logits, target, mask)
-                else:
-                    self.compute_logging_metrics(logits, target)
-
+                self.compute_logging_metrics(logits, target)
             if (batch_idx + 1) % self.log_interval == 0:
                 self.log(batch_idx + 1, epoch)
 
@@ -187,7 +175,10 @@ class Trainer:
                         "train_loss": loss.item(),
                         "learning_rate": self.optimizer.param_groups[0]["lr"],
                         "epoch": epoch,
-                        **{f"train_{k}": v.avg for k, v in self.training_metrics.items()},
+                        **{
+                            f"train_{k}": v.avg
+                            for k, v in self.training_metrics.items()
+                        },
                     },
                     step=epoch * len(self.train_loader) + batch_idx,
                 )
@@ -496,134 +487,3 @@ class SegTrainer(Trainer):
         self.training_metrics["mAcc"].update(macc.item())
         self.training_metrics["mIoU"].update(miou.item())
 
-
-
-class RegTrainer(Trainer):
-    """
-    Regression trainer with per-channel metrics (MAE/RMSE/R2).
-    Expects:
-      target: (B,C,H,W) float
-      mask  : (B,H,W) or (B,1,H,W) with 1=valid
-    """
-
-    def __init__(self, *args, channel_names=None, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        # Names for channels (optional). Example: ["r","H","w"]
-        self.channel_names = channel_names
-
-        # Global (averaged) + per-channel meters
-        self.training_metrics = {
-            name: RunningAverageMeter(length=100) for name in ["MAE", "RMSE", "R2"]
-        }
-        # Create per-channel meters lazily once we know C, or eagerly if provided
-        self.training_metrics_ch = {}
-
-        # For regression we usually minimize RMSE/MAE
-        self.best_metric = float("inf")
-        self.best_metric_comp = operator.lt
-
-    def _ensure_mask(self, mask: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        if mask.ndim == 3:      # (B,H,W)
-            mask = mask.unsqueeze(1)
-        elif mask.ndim == 4:    # (B,1,H,W)
-            if mask.shape[1] != 1:
-                raise ValueError(f"mask expected (B,1,H,W); got {tuple(mask.shape)}")
-        else:
-            raise ValueError(f"mask ndim unsupported: {mask.ndim}, shape={tuple(mask.shape)}")
-
-        mask = mask.to(dtype=target.dtype, device=target.device)
-        mask = (mask > 0.5).to(target.dtype)
-        return mask
-
-    def _init_channel_meters(self, C: int):
-        if self.training_metrics_ch:
-            return
-
-        if self.channel_names is None:
-            names = [f"ch{c}" for c in range(C)]
-        else:
-            if len(self.channel_names) != C:
-                raise ValueError(
-                    f"channel_names length ({len(self.channel_names)}) != C ({C})."
-                )
-            names = self.channel_names
-
-        for name in names:
-            self.training_metrics_ch[f"MAE_{name}"] = RunningAverageMeter(length=100)
-            self.training_metrics_ch[f"RMSE_{name}"] = RunningAverageMeter(length=100)
-            self.training_metrics_ch[f"R2_{name}"] = RunningAverageMeter(length=100)
-
-        # Merge into main dict so Trainer.log() prints them
-        self.training_metrics.update(self.training_metrics_ch)
-
-    def compute_loss(self, pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        if target.dtype not in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
-            target = target.float()
-
-        # Asegura forma/dtype del mask (B,1,H,W) float 0/1
-        mask = self._ensure_mask(mask, target)
-
-        # IMPORTANTE: tu criterion debe aceptar (pred, target, mask) y retornar ESCALAR
-        # Ej: MaskedHuberLoss.forward(pred, target, mask) -> scalar
-        return self.criterion(pred, target, mask)
-
-    @torch.no_grad()
-    def compute_logging_metrics(self, pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> None:
-        if target.dtype not in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
-            target = target.float()
-
-        mask = self._ensure_mask(mask, target)  # (B,1,H,W)
-        valid = mask > 0.5
-
-        B, C, H, W = pred.shape
-        self._init_channel_meters(C)
-
-        eps = 1e-6
-
-        mae_list = []
-        rmse_list = []
-        r2_list = []
-
-        # Choose channel labels for logging
-        if self.channel_names is None:
-            ch_labels = [f"ch{c}" for c in range(C)]
-        else:
-            ch_labels = self.channel_names
-
-        for c in range(C):
-            p = pred[:, c:c+1]
-            t = target[:, c:c+1]
-            v = valid  # (B,1,H,W)
-
-            if v.sum() == 0:
-                continue
-
-            diff = p - t
-            mae_c = diff.abs()[v].mean()
-            rmse_c = torch.sqrt((diff.pow(2)[v]).mean() + eps)
-
-            t_valid = t[v]
-            p_valid = p[v]
-            t_mean = t_valid.mean()
-            ss_tot = ((t_valid - t_mean) ** 2).sum()
-            ss_res = ((t_valid - p_valid) ** 2).sum()
-            r2_c = 1.0 - (ss_res / (ss_tot + eps))
-
-            # Update per-channel meters
-            name = ch_labels[c]
-            self.training_metrics[f"MAE_{name}"].update(mae_c.item())
-            self.training_metrics[f"RMSE_{name}"].update(rmse_c.item())
-            self.training_metrics[f"R2_{name}"].update(r2_c.item())
-
-            mae_list.append(mae_c)
-            rmse_list.append(rmse_c)
-            r2_list.append(r2_c)
-
-        if len(mae_list) == 0:
-            return
-
-        # Also keep global averages across channels
-        self.training_metrics["MAE"].update(torch.stack(mae_list).mean().item())
-        self.training_metrics["RMSE"].update(torch.stack(rmse_list).mean().item())
-        self.training_metrics["R2"].update(torch.stack(r2_list).mean().item())

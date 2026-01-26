@@ -3,7 +3,7 @@ work_dir: ""
 seed: 234
 use_wandb: true
 wandb_run_id: null
-wandb_project: "Utae-FuelMap-Classifier"
+wandb_project: "Utae-FuelMap-Regressor"
 
 # TRAINING
 num_workers: 4
@@ -26,12 +26,12 @@ use_final_ckpt: false
 
 
 defaults:
-  - task: segmentation
-  - dataset: fuelmap
+  - task: regression
+  - dataset: fuelmapreg
   - encoder: utae_encoder
-  - decoder: seg_utae
-  - preprocessing: ???
-  - criterion: weighted_cross_entropy
+  - decoder: reg_utae
+  - preprocessing: reg_default
+  - criterion: masked_huber_loss
   - lr_scheduler: multi_step_lr
   - optimizer: adamw
   - _self_ 
