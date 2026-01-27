@@ -1,21 +1,38 @@
 train: false
-pretrain: false
 work_dir: ""
 seed: 234
+
 use_wandb: false
+wandb_run_id: null
 wandb_project: ""
 
-# TRAINING
+# (no se usan realmente en test, pero dejarlos evita sorpresas)
 num_workers: 1
-batch_size: 8
-
+batch_size: 1
+test_num_workers: 4
+test_batch_size: 1
 
 # EXPERIMENT
-use_final_ckpt: false
 finetune: false
-ckpt_dir: ???
+from_scratch: false
+ft_rate: 1.0
+limited_label_train: 1
+limited_label_val: 1
+limited_label_strategy: stratified
+stratification_bins: 3
+data_replicate: 1
+use_final_ckpt: false
 
+# ✅ CLAVE: carpeta del experimento (NO el .pth)
+ckpt_dir: /home/nisla/ShapingFT/results_class_hier2_SV/20260127_022412_16b716_utae_encoder_seg_utae_fuelmaphier2_SV/
 
 defaults:
-  - task: ???
-  - _self_ 
+  - task: segmentation
+  - dataset: fuelmap
+  - encoder: utae_encoder
+  - decoder: seg_utae
+  - preprocessing:   
+  - criterion: 
+  - lr_scheduler: multi_step_lr
+  - optimizer: adamw
+  - _self_

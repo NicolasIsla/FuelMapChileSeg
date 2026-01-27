@@ -1,160 +1,204 @@
-# Shaping Fine-Tuning of Geospatial Foundation Models: Effects of Label Availability and Temporal Resolution
-
-🔥 The [pre-print](https://arxiv.org/) is out!
-
-## 📚 Introduction
-
-Fine-tuning foundation models is a key step in adapting them to a particular task. In the case of Geospatial Foundation Models (GFMs), fine-tuning can be particularly challenging given data scarcity both in terms of the amount of labeled data and, in the case of Satellite Image Time Series (SITS), temporal context. Under these circumstances, the optimal GFM fine-tuning strategy across different labeled data regimes remains poorly understood. In this paper, we thoroughly assess and study the performances of two different GFMs given several combinations of two data scarcity factors: number of labeled samples and sequence length. Specifically, we analyze the performances on a crop classification task, i.e., semantic segmentation, of the Sentinel-2 images contained in the PASTIS-HD dataset. We compare GFMs to U-TAE, a fully supervised baseline, across varying amounts of labeled data (1%, 10%, 50%, 100%) and temporal input lengths (1, 6, 15, 25 and 35) under different training configurations.
-
-
-<img src=".github/github.jpeg" alt="Shaping Fine-Tuning of Geospatial Foundation Models" width="90%">
-
-
-In this repo, you can find the code to our work. We included two GFMs that present different approaches.
-
-For the moment, we support the following **models**:
-
-|             | Paper | GitHub | Keywords |
-|:-----------:|:-----:|:------:|:--------:|
-|  [SSL4EOS12](https://arxiv.org/abs/2211.07044)  | SSL4EO-S12: A Large-Scale Multi-Modal, Multi-Temporal <br> Dataset for Self-Supervised Learning in Earth Observation      | [link](https://github.com/zhu-xlab/SSL4EO-S12) | DINO|
-|  [CROMA](https://arxiv.org/pdf/2311.00566)      | CROMA: Remote Sensing Representations with Contrastive Radar-Optical Masked Autoencoders  | [link](https://github.com/antofuller/CROMA) | Contrastive Learning, MAE |
-|  [U-TAE](https://arxiv.org/abs/2107.07933) | Panoptic Segmentation of Satellite Image Time Series with Convolutional Temporal Attention Networks    | [link](https://github.com/VSainteuf/utae-paps) | U-Net + Time-Attention Encoding |
-
-And the following **datasets**:
-
-|                     | Download | Domain | Task | Sensors | Location |
-|:-------------------:|:--------:|:------:|:----:|:-------:|:--------:|
-|        [PASTIS-R](https://arxiv.org/abs/2404.08351)       |    [link](https://huggingface.co/datasets/IGNF/PASTIS-HD)       |   Agriculture     |  Semantic Segmentation    |    S1, S2, SPOT-6  | France   |
-
-The repository supports Multi-Temporal Semantic Segmentation using geospatial foundation models.
-
-It is also possible to train a [supervised baseline](#-fully-supervised-baseline), based on UTAE.
-
-## 🛠️ Setup
-Clone the repository:
-```
-git clone https://github.com/GioCastiglioni/ShapingFT.git
-cd ShapingFT
-```
-
-**Dependencies**
-
-```
-conda env create -n ShapingFT python=3.11
-conda activate ShapingFT
-cd ShapingFT
-pip install -r requirements.txt
-```
-
-## 🏋️ Training
-
-To run experiments, please refer to `configs/train.yaml`. In it, in addition to some basic info about training (e.g. `finetune` for fine-tuning also the encoder, `limited_label_train` to train the model on a subset of labels, `num_workers`, `batch_size` and so on), there are more basic configs:
-- `preprocessing`: Both preprocessing and augmentations steps required for the dataset, such as bands adaptation, normalization, resize/crop.
-
-
-Other 3 configs are used to set other training parameters:
-- `criterion`: in which you can choose the loss for the training. Consider that if you want to add a custom loss, you should add to `shapeft/utils/losses.py`. We support `cross_entropy` and `weigthed_cross_entropy` loss functions.
-- `lr_scheduler`: in which you can choose the scheduler. Consider that if you want to add a custom one, you should add to `shapeft/utils/schedulers.py`. 
-- `optimizer`: in which you can choose the optimizer. Consider that if you want to add a custom one, you should add to `shapeft/utils/optimizers.py`.
-
-
-We provide several examples of command lines to initialize different training tasks on single GPU.
-
-Please note:
- - The repo adopts [hydra](https://github.com/facebookresearch/hydra), so you can easily log your experiments and overwrite parameters from the command line. More examples are provided later.
- - To use more gpus or nodes, set `--nnodes` and `--nproc_per_node` correspondingly. Please refer to the [torchrun doc](https://pytorch.org/docs/stable/elastic/run.html).
-
-```
-export PATH="$HOME/miniconda3/bin:$PATH"
-source "$HOME/miniconda3/etc/profile.d/conda.sh"
-conda activate ShapingFT
-export PYTHONPATH=$HOME/ShapingFT:$PYTHONPATH
-cd $HOME/ShapingFT
-```
-
-### 💻 Decoder Finetuning
-
-```
-torchrun --nnodes=1 --nproc_per_node=1 shapeft/run.py --config-name=train -m \
-dataset=pastis \
-dataset.multi_temporal=1,6,15,25,35 \
-encoder=croma_optical \
-decoder=seg_upernet_mt_ltae \
-preprocessing=seg_default \
-criterion=cross_entropy \
-optimizer.lr=0.001 \
-finetune=False \
-from_scratch=False \
-work_dir=$HOME/ShapingFT/results \
-limited_label_train=0.01,0.1,0.5,1.0
-```
-
-### 💻 End-to-end Finetuning
-
-It is enough to add `finetune=True` to the command line, and select the desired fine-tuning rate (lr_encoder/lr_decoder).
-
-```
-torchrun --nnodes=1 --nproc_per_node=1 shapeft/run.py --config-name=train -m \
-dataset=pastis \
-dataset.multi_temporal=1,6,15,25,35 \
-encoder=croma_optical \
-decoder=seg_upernet_mt_ltae \
-preprocessing=seg_default \
-criterion=cross_entropy \
-optimizer.lr=0.001 \
-ft_rate=0.1 \
-finetune=True \
-from_scratch=False \
-work_dir=$HOME/ShapingFT/results \
-limited_label_train=0.01,0.1,0.5,1.0
-```
-
-Note: You also have the option to train the GFM architecture from scratch, without loading its pretrained weights.
-
-### 💻 Fully Supervised Baseline 
-
-The repo supports also training a fully supervised UTAE. To run it, follow the same command line rules as for other models. Keep in mind that setting finetune=True and from_scracth=True is necessary since this fully supervised approach trains the model from scratch. 
-
-```
-torchrun --nnodes=1 --nproc_per_node=1 shapeft/run.py --config-name=train -m \
-dataset=pastis \
-dataset.multi_temporal=1,6,15,25,35 \
-encoder=utae_encoder \
-decoder=seg_utae \
-preprocessing=seg_default \
-criterion=cross_entropy \
-optimizer.lr=0.001 \
-ft_rate=1.0 \
-finetune=True \
-from_scratch=True \
-work_dir=$HOME/ShapingFT/results \
-limited_label_train=0.01,0.1,0.5,1.0
-```
-
-## 🏃 Evaluation 
-
-An evaluation step is always run after the training.
-
-If you want to just run an evaluation, indicate the `ckpt_dir` where the checkpoints and configurations are stored.
-
-```
-torchrun shapeft/run.py --config-name=test ckpt_dir=path_to_ckpt_dir
-```
-## 📝 Citation
-
-If you find this work useful, please cite:
-
-```
-@misc{castiglioni2025shapingfinetuningofgfm,
-      title={Shaping Fine-Tuning of Geospatial Foundation Models: Effects of Label Availability and Temporal Resolution}, 
-      author={Giovanni Castiglioni and Nicolas Isla and Cristian Buc and Javiera Castillo-Navarro and Sebastien Lefèvre and Valentin Barriere},
-      year={2025},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/}, 
-}
-```
-
 ## 🙏 Acknowledgment
 
 This repository builds upon the [PANGAEA Benchmark Repository](https://github.com/VMarsocci/pangaea-bench) by Marsocci, V. et al., incorporating substantial modifications. We gratefully acknowledge the foundational contributions of their work, which provided a solid starting point for our development.
+
+## results new
+
+### Test Results — Semantic Segmentation (UTAE)
+
+| Class | IoU (%) | F1-score (%) | Precision (%) | Recall (%) |
+|------|--------:|-------------:|--------------:|-----------:|
+| Background | 0.000 | 0.000 | 0.000 | 0.000 |
+| PL10 | 1.477 | 2.910 | 1.563 | 21.011 |
+| PL09 | 12.710 | 22.554 | 23.767 | 21.458 |
+| PL11 | 12.993 | 22.998 | 24.776 | 21.458 |
+| SV02 | 25.784 | 40.997 | 49.024 | 35.228 |
+| MT03 | 0.867 | 1.720 | 4.891 | 1.043 |
+| PL08 | 10.930 | 19.705 | 30.057 | 14.657 |
+| PL05 | 0.633 | 1.258 | 0.660 | 13.494 |
+| PL04 | 28.166 | 43.953 | 60.672 | 34.457 |
+| PL02 | 11.481 | 20.597 | 16.549 | 27.267 |
+| SV01 | 62.894 | 77.221 | 86.739 | 69.586 |
+| PCH4 | 0.191 | 0.381 | 0.227 | 1.199 |
+| PCH2 | 9.726 | 17.727 | 17.677 | 17.778 |
+| MT01 | 3.945 | 7.590 | 5.967 | 10.425 |
+| PCH1 | 8.046 | 14.893 | 27.176 | 10.257 |
+| PL01 | 26.622 | 42.050 | 35.040 | 52.566 |
+| SV03 | 68.722 | 81.462 | 89.525 | 74.731 |
+| MT02 | 3.107 | 6.027 | 4.246 | 10.381 |
+| DX02 | 0.000 | 0.000 | 0.000 | 0.000 |
+| BN05 | 0.000 | 0.000 | 0.000 | 0.000 |
+| BN04 | 0.946 | 1.874 | 1.012 | 12.605 |
+| MT04 | 0.061 | 0.123 | 0.064 | 1.408 |
+| MT07 | 0.000 | 0.000 | 0.000 | 0.000 |
+| MT06 | 27.160 | 42.718 | 62.885 | 32.345 |
+| PL07 | 20.246 | 33.674 | 29.214 | 39.742 |
+| PCH5 | 37.278 | 54.311 | 46.819 | 64.657 |
+| PL03 | 15.931 | 27.484 | 25.698 | 29.537 |
+| DX01 | 2.891 | 5.619 | 3.585 | 12.985 |
+| BN03 | 25.471 | 40.600 | 59.819 | 30.728 |
+| PL06 | 10.122 | 18.383 | 14.880 | 24.046 |
+| PCH3 | 15.507 | 26.850 | 60.001 | 17.295 |
+| BN01 | 0.000 | 0.000 | 0.000 | 0.000 |
+| MT08 | 0.000 | 0.000 | 0.000 | 0.000 |
+| **Mean** | **13.452** | **20.475** | **23.713** | **21.283** |
+
+#### Global metrics
+- **Mean Accuracy:** 34.858 %
+- **Epoch:** 39
+- **Learning rate:** 1e-5
+
+
+
+### Test Results — Regression (UTAE)
+
+| Target | MAE | RMSE | R² |
+|-------|-----:|-----:|---:|
+| r | 0.743284 | 0.912383 | 0.110178 |
+| H | 0.409953 | 0.866762 | 0.128184 |
+| w | 0.705092 | 0.916685 | 0.173660 |
+| **Mean** | **0.619443** | **0.898610** | **0.137341** |
+
+
+### Test Results — Segmentation (Hierarchical Level-1)
+
+#### Per-class metrics
+
+| Class | IoU (%) | F1-score (%) | Precision (%) | Recall (%) |
+|------|--------:|-------------:|--------------:|-----------:|
+| Background | 0.000 | 0.000 | 0.000 | 0.000 |
+| BN | 37.799 | 54.861 | 64.058 | 47.973 |
+| DX | 7.222 | 13.470 | 16.822 | 11.233 |
+| MT | 36.675 | 53.667 | 55.040 | 52.361 |
+| PCH | 58.272 | 73.636 | 75.893 | 71.509 |
+| PL | 68.005 | 80.956 | 76.709 | 85.701 |
+| SV | 68.548 | 81.339 | 80.662 | 82.028 |
+| **Mean** | **39.503** | **51.133** | **52.741** | **50.115** |
+
+#### Global metrics
+- **Mean Accuracy:** **72.494 %**
+
+### (Level-2)
+#### BN (Level-2) — Test metrics
+
+| Class       | IoU (%) | F1-score (%) | Precision (%) | Recall (%) |
+|------------|--------:|-------------:|--------------:|-----------:|
+| Background |   0.000 |        0.000 |         0.000 |      0.000 |
+| BN01       |  11.245 |       20.217 |        39.644 |     13.568 |
+| BN03       |  59.000 |       74.214 |        70.487 |     78.357 |
+| BN04       |  26.143 |       41.449 |        45.666 |     37.945 |
+| BN05       |   0.737 |        1.464 |         1.051 |      2.408 |
+| **Mean**   | **19.425** | **27.469** | **31.370** | **26.456** |
+
+**Mean Accuracy:** **61.659%**
+#### DX (Level-2) — Test metrics
+
+| Class       | IoU (%) | F1-score (%) | Precision (%) | Recall (%) |
+|------------|--------:|-------------:|--------------:|-----------:|
+| Background |   0.000 |        0.000 |         0.000 |      0.000 |
+| DX01       |  45.514 |       62.556 |        47.940 |     89.993 |
+| DX02       |  25.578 |       40.736 |        68.109 |     29.058 |
+| **Mean**   | **23.697** | **34.431** | **38.683** | **39.684** |
+
+**Mean Accuracy:** **51.045%**
+#### MT (Level-2) — Test metrics
+
+| Class       | IoU (%) | F1-score (%) | Precision (%) | Recall (%) |
+|------------|--------:|-------------:|--------------:|-----------:|
+| Background |   0.000 |        0.000 |         0.000 |      0.000 |
+| MT01       |  34.584 |       51.394 |        47.401 |     56.123 |
+| MT02       |  47.597 |       64.496 |        62.982 |     66.084 |
+| MT03       |   2.264 |        4.427 |         5.684 |      3.625 |
+| MT04       |   0.000 |        0.000 |         0.000 |      0.000 |
+| MT05       |  68.080 |       81.009 |        90.643 |     73.226 |
+| MT06       |   0.000 |        0.000 |         0.000 |      0.000 |
+| MT07       |   8.385 |       15.473 |        15.053 |     15.917 |
+| **Mean**   | **20.114** | **27.100** | **27.720** | **26.872** |
+
+**Mean Accuracy:** **64.861%**
+
+
+#### PCH (Level-2) — Test metrics
+
+| Class       | IoU (%) | F1-score (%) | Precision (%) | Recall (%) |
+|------------|--------:|-------------:|--------------:|-----------:|
+| Background |   0.000 |        0.000 |         0.000 |      0.000 |
+| PCH1       |  20.687 |       34.283 |        36.730 |     32.141 |
+| PCH2       |  22.218 |       36.358 |        47.409 |     29.485 |
+| PCH3       |  22.703 |       37.005 |        60.738 |     26.608 |
+| PCH4       |   0.000 |        0.000 |         0.000 |      0.000 |
+| PCH5       |  64.202 |       78.199 |        69.368 |     89.605 |
+| **Mean**   | **21.635** | **30.974** | **35.707** | **29.640** |
+
+**Mean Accuracy:** **60.705%**
+
+#### PL (Level-2) — Test metrics
+
+| Class       | IoU (%) | F1-score (%) | Precision (%) | Recall (%) |
+|------------|--------:|-------------:|--------------:|-----------:|
+| Background |   0.000 |        0.000 |         0.000 |      0.000 |
+| PL1        |  39.487 |       56.617 |        61.791 |     52.243 |
+| PL2        |  17.391 |       29.629 |        32.217 |     27.425 |
+| PL3        |  10.259 |       18.608 |        13.005 |     32.693 |
+| PL4        |  31.633 |       48.062 |        45.724 |     50.653 |
+| PL5        |   0.000 |        0.000 |         0.000 |      0.000 |
+| PL6        |  24.105 |       38.846 |        58.475 |     29.083 |
+| PL7        |  17.397 |       29.638 |        26.851 |     33.071 |
+| PL8        |  10.097 |       18.341 |        18.796 |     17.908 |
+| PL9        |  14.446 |       25.246 |        33.748 |     20.165 |
+| PL10       |   0.566 |        1.125 |         0.605 |      7.914 |
+| PL11       |  17.042 |       29.121 |        29.319 |     28.925 |
+| **Mean**   | **15.202** | **24.603** | **26.711** | **25.007** |
+
+**Mean Accuracy:** **34.007%**
+
+
+#### SV (Level-2) — Test metrics
+
+| Class       | IoU (%) | F1-score (%) | Precision (%) | Recall (%) |
+|------------|--------:|-------------:|--------------:|-----------:|
+| Background |   0.000 |        0.000 |         0.000 |      0.000 |
+| SV1        |  87.129 |       93.122 |        93.436 |     92.810 |
+| SV2        |  85.988 |       92.466 |        90.983 |     93.998 |
+| SV3        |  94.477 |       97.160 |        98.127 |     96.212 |
+| **Mean**   | **66.899** | **70.687** | **70.636** | **70.755** |
+
+**Mean Accuracy:** **94.737%**
+
+## results old
+
+### 📊 Datos Landsat (Leakage Test in Train)
+
+| Enfoque                  | Parámetro | MAE        | R² |
+|--------------------------|-----------|------------|----|
+| Regresión pura           | w         | 0.7489749  | —  |
+| Regresión pura           | H         | 407.53532  | —  |
+| Regresión pura           | r         | 0.0026546  | —  |
+| Regresión jerárquica     | w         | 0.6174421  | —  |
+| Regresión jerárquica     | H         | 399.23280  | —  |
+| Regresión jerárquica     | r         | 0.0025524  | —  |
+| Clasificación pura       | w         | 0.8428168  | —  |
+| Clasificación pura       | H         | 329.92974  | —  |
+| Clasificación pura       | r         | 0.0025854  | —  |
+| Clasificación jerárquica | w         | 0.8476412  | —  |
+| Clasificación jerárquica | H         | 400.97407  | —  |
+| Clasificación jerárquica | r         | 0.0027828  | —  |
+
+
+### 📊 Datos Copernicus
+
+| Enfoque                  | Parámetro | MAE        | RMSE       | R² |
+|--------------------------|-----------|------------|------------|----|
+| Regresión pura           | w         | 0.6396815  | 0.9219133  | —  |
+| Regresión pura           | H         | 160.75581  | 224.52106  | —  |
+| Regresión pura           | r         | 0.0022573  | 0.0031102  | —  |
+| Regresión jerárquica     | w         | 0.4977280  | 1.0192365  | —  |
+| Regresión jerárquica     | H         | 104.53683  | 230.58359  | —  |
+| Regresión jerárquica     | r         | 0.0017952  | 0.0029971  | —  |
+| Clasificación pura       | w         | 0.4179858  | 1.0191094  | —  |
+| Clasificación pura       | H         | 106.99273  | 261.25199  | —  |
+| Clasificación pura       | r         | 0.0015613  | 0.0036806  | —  |
+| Clasificación jerárquica | w         | 0.3534438  | 1.0187161  | —  |
+| Clasificación jerárquica | H         | 86.457098  | 233.86511  | —  |
+| Clasificación jerárquica | r         | 0.0011983  | 0.0032012  | —  |
+

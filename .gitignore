@@ -30,3 +30,6 @@ Thumbs.dbs
 .ipynb_checkpoints
 .vscode/
 *.ipynb
+rf*/
+randomforest/
+metrics/
