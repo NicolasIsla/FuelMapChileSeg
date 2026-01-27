@@ -1,0 +1,165 @@
+# configs/dataset/fuelmap.yaml
+_target_: shapeft.datasets.fuelmap_hier2.FuelMap
+
+dataset_name: FuelMapHier1
+root_path: /data/nisla/fuel_map_chile3/
+download_url: ""
+auto_download: false
+
+img_size: 128
+multi_temporal: 35         # must be one of [1,6,15,25,35]
+multi_modal: true
+obj: sv        # consistent string
+
+
+ignore_index: 0            # not used in regression; mask is separate
+num_classes: 4
+
+bands:
+  optical:                 # make sure order matches your saved arrays
+    - B1
+    - B2
+    - B3
+    - B4
+    - B5
+    - B6
+    - B7
+    - B8
+    - B8A
+    - B11
+    - B12
+    - B13                  # <-- QUITA ESTA SI NO EXISTE EN TUS ARRAYS (ver notas abajo)
+  sar_asc:
+    - VV
+    - VH
+  sar_desc:
+    - VV
+    - VH
+  elevation:
+    - elevation
+  mTPI:
+    - mTPI
+  landforms:
+    - landforms
+
+
+
+classes:
+  - Background
+  - SV1   # id 1
+  - SV2   # id 2
+  - SV3   # id 3
+
+distribution:
+  - 0.878169  # Background (id 0)
+  - 0.031492  # SV1 (id 1)
+  - 0.029457  # SV2 (id 2)
+  - 0.060882  # SV3 (id 3)
+
+data_mean:
+  optical:
+    - 2303.2992
+    - 2251.7293
+    - 2278.8316
+    - 2253.5023
+    - 2557.0465
+    - 3125.8736
+    - 3322.8017
+    - 3479.4525
+    - 3445.7466
+    - 4165.3234
+    - 2241.5551
+    - 1703.0405
+  sar_asc:
+    - 0.1112
+    - 0.0273
+  sar_desc:
+    - 0.1074
+    - 0.0259
+  elevation:
+    - 0.0113
+  mTPI:
+    - -0.0086
+  landforms:
+    - 0.1096
+
+data_std:
+  optical:
+    - 3209.456
+    - 3052.9151
+    - 2854.4335
+    - 2800.0855
+    - 2779.7003
+    - 2415.3432
+    - 2293.1068
+    - 2327.9943
+    - 2185.5189
+    - 3503.2669
+    - 1542.7544
+    - 1380.4435
+  sar_asc:
+    - 0.5352
+    - 0.0699
+  sar_desc:
+    - 0.3388
+    - 0.0686
+  elevation:
+    - 0.0137
+  mTPI:
+    - 0.092
+  landforms:
+    - 0.0291
+
+data_min:
+  optical:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+  sar_asc:
+    - 0.0
+    - 0.0
+  sar_desc:
+    - 0.0
+    - 0.0
+  elevation:
+    - -0.0005493331700563431
+  mTPI:
+    - -1.0
+  landforms:
+    - 0.0
+
+data_max:
+  optical:
+    - 20978.0
+    - 19592.0
+    - 18312.0
+    - 17352.0
+    - 17023.0
+    - 16857.0
+    - 16702.0
+    - 16504.0
+    - 16427.0
+    - 16458.0
+    - 15325.0
+    - 15186.0
+  sar_asc:
+    - 817.8963623046875
+    - 76.3246841430664
+  sar_desc:
+    - 1125.4569091796875
+    - 167.44996643066406
+  elevation:
+    - 0.09689626842737198
+  mTPI:
+    - 1.3923272490501404e-07
+  landforms:
+    - 0.16470588743686676

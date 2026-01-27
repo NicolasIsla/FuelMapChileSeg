@@ -11,7 +11,7 @@ trainer:
   criterion: null
 
   # params to adapt
-  n_epochs: 80
+  n_epochs: 40
   precision: fp32
   ckpt_interval: 1000
   eval_interval: 2
