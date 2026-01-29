@@ -1,5 +1,5 @@
 # configs/dataset/fuelmap.yaml
-_target_: shapeft.datasets.fuelmap.FuelMap
+_target_: shapeft.datasets.fuelmap2.FuelMap
 
 dataset_name: FuelMap
 root_path: /data/nisla/fuel_map_chile3/

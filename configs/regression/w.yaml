@@ -34,6 +34,6 @@ defaults:
   - criterion: masked_huber_loss
   - lr_scheduler: multi_step_lr
   - optimizer: adamw
-  - optimizer: adamw
+  - ann_dir: H
 
   - _self_ 

@@ -9,6 +9,8 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import numpy as np
+import math
 
 
 class Evaluator:
@@ -158,9 +160,23 @@ class SegEvaluator(Evaluator):
             inference_mode: str = 'sliding',
             sliding_inference_batch: int = None,
             use_wandb: bool = False,
-            dataset_name: str = 'PASTIS-HD'
+            dataset_name: str = 'PASTIS-HD',
+            save_predictions: bool = False,
+            save_logits: bool = False,          # OJO: puede ser ENORME
+            save_targets: bool = True,
+            preds_subdir: str = "predictions",
     ):
         super().__init__(val_loader, exp_dir, device, inference_mode, sliding_inference_batch, use_wandb, dataset_name)
+
+        self.save_predictions = save_predictions
+        self.save_logits = save_logits
+        self.save_targets = save_targets
+
+        self.preds_dir = Path(self.exp_dir) / preds_subdir / self.split / f"rank{self.rank}"
+        if self.rank == 0:
+            (Path(self.exp_dir) / preds_subdir / self.split).mkdir(parents=True, exist_ok=True)
+        torch.distributed.barrier()
+        self.preds_dir.mkdir(parents=True, exist_ok=True)
 
     def reshape_transform(self, tensor, height=15, width=15):
         # Reshape (batch, seq_len, embed_dim) -> (batch, embed_dim, height, width)
@@ -190,7 +206,7 @@ class SegEvaluator(Evaluator):
         confusion_matrix = torch.zeros(
             (self.num_classes, self.num_classes), device=self.device
         )
-
+        sample_counter = 0
         for batch_idx, data in enumerate(tqdm(self.val_loader, desc=tag)):
             image, target = data["image"], data["target"]
             image = {k: v.to(self.device) for k, v in image.items()}
@@ -215,6 +231,27 @@ class SegEvaluator(Evaluator):
             else:
                 pred = torch.argmax(logits, dim=1)
 
+            if self.save_predictions:
+                B = pred.shape[0]
+
+                for i in range(B):
+                    sid = f"{batch_idx:06d}_{i:02d}_{sample_counter:08d}"
+                    out_path = self.preds_dir / f"{sid}.npz"
+
+                    out = {
+                        "pred": pred[i].detach().cpu().to(torch.int16).numpy(),  # (H,W)
+                    }
+
+                    if self.save_targets:
+                        out["target"] = target[i].detach().cpu().to(torch.int16).numpy()
+
+                    if self.save_logits:
+                        # logits: (C,H,W) - puede ser grande
+                        out["logits"] = logits[i].detach().cpu().to(torch.float16).numpy()
+
+                    np.savez_compressed(out_path, **out)
+
+                sample_counter += B
             valid_mask = target != self.ignore_index
             pred, target = pred[valid_mask], target[valid_mask]
 
@@ -357,9 +394,23 @@ class RegEvaluator(Evaluator):
         use_wandb: bool = False,
         dataset_name: str = "FuelMap",
         channel_names: list[str] | None = None,  # e.g. ["r","H","w"]
+        save_predictions: bool = False,
+        save_logits: bool = False,          # OJO: puede ser ENORME
+        save_targets: bool = True,
+        preds_subdir: str = "predictions",
     ):
         super().__init__(val_loader, exp_dir, device, inference_mode, sliding_inference_batch, use_wandb, dataset_name)
         self.channel_names = channel_names
+
+        self.save_predictions = save_predictions
+        self.save_logits = save_logits
+        self.save_targets = save_targets
+
+        self.preds_dir = Path(self.exp_dir) / preds_subdir / self.split / f"rank{self.rank}"
+        if self.rank == 0:
+            (Path(self.exp_dir) / preds_subdir / self.split).mkdir(parents=True, exist_ok=True)
+        torch.distributed.barrier()
+        self.preds_dir.mkdir(parents=True, exist_ok=True)
 
     def _ensure_mask(self, mask: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         if mask.ndim == 3:
@@ -419,6 +470,7 @@ class RegEvaluator(Evaluator):
         n_valid = None
 
         tag = f"Evaluating {model_name} on {self.split} set"
+        sample_counter = 0
         for _, data in enumerate(tqdm(self.val_loader, desc=tag)):
             image = {k: v.to(self.device) for k, v in data["image"].items()}
             target = data["target"].to(self.device).float()
@@ -432,6 +484,27 @@ class RegEvaluator(Evaluator):
                 metadata = metadata.to(self.device)
 
             pred = self._infer(model, image, target, metadata=metadata).float()  # (B,C,H,W)
+            if self.save_predictions:
+                B, C, H, W = pred.shape
+                for i in range(B):
+                    sid = f"{_:06d}_{i:02d}_{sample_counter:08d}"
+                    out_path = self.preds_dir / f"{sid}.npz"
+
+                    out = {
+                        "pred": pred[i].detach().cpu().to(torch.float16).numpy(),     # (C,H,W)
+                        "mask": mask[i].detach().cpu().to(torch.uint8).numpy(),       # (1,H,W) bool-ish
+                    }
+                    if self.save_targets:
+                        out["target"] = target[i].detach().cpu().to(torch.float16).numpy()
+
+                    if self.save_logits:
+                        # en regresión "logits" == pred normalmente; solo guarda si realmente es distinto
+                        out["logits"] = pred[i].detach().cpu().to(torch.float16).numpy()
+
+                    np.savez_compressed(out_path, **out)
+
+                sample_counter += B
+
             if pred.shape != target.shape:
                 raise ValueError(f"pred shape {tuple(pred.shape)} != target shape {tuple(target.shape)}")
 

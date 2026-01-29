@@ -4,6 +4,8 @@ os.environ["HYDRA_FULL_ERROR"] = "1"
 import pathlib
 import pprint
 import time
+from pathlib import Path
+
 
 import hydra
 import torch
@@ -336,7 +338,7 @@ def main(cfg: DictConfig) -> None:
             trainer.load_model(cfg.ckpt_dir)
 
         trainer.train()
-
+    exp_dir = pathlib.Path(cfg.work_dir) / exp_name
     # Evaluation
     test_preprocessor = instantiate(
         cfg.preprocessing.test,
@@ -359,10 +361,24 @@ def main(cfg: DictConfig) -> None:
             collate_fn=collate_fn,
         )
     test_evaluator: Evaluator = instantiate(
-            cfg.task.evaluator, val_loader=test_loader, exp_dir=exp_dir, device=device,
-            inference_mode= cfg.task.evaluator.inference_mode, #'sliding' if train_run else 'whole',
-            dataset_name=cfg.dataset.dataset_name
+            cfg.task.evaluator,
+            val_loader=test_loader,
+            exp_dir=exp_dir,
+            device=device,
+            inference_mode=cfg.task.evaluator.inference_mode,
+            dataset_name=cfg.dataset.dataset_name,
+                    # elimina todo lo de cfg.eval.*
         )
+    test_evaluator.save_predictions = True
+    test_evaluator.save_logits = True
+    test_evaluator.save_targets = True
+    # create dir
+    pred_root = Path("/data/nisla/UTAE_results/regression_H") / exp_dir.name   # mantiene el nombre del experimento
+    pred_dir = pred_root / "predictions_test" / f"rank{rank}"
+    pred_dir.mkdir(parents=True, exist_ok=True)
+
+    print("saving in:", pred_dir)
+    test_evaluator.preds_dir = pred_dir
 
     if cfg.use_final_ckpt:
         model_ckpt_path = get_final_model_ckpt_path(exp_dir)

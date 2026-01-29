@@ -197,7 +197,7 @@ class FuelMap(RawGeoFMDataset):
 
         # Convert to torch (recommended; if your pipeline expects numpy, remove these conversions)
         target = torch.from_numpy(target_np).to(torch.int64)
-        mask_path = os.path.join(self.root_path, "ANNOTATIONS_masked", f"{name}_masked.npy")
+        mask_path = os.path.join(self.root_path, "ANNOTATIONS_masked", f"{name}.npy")
         if os.path.exists(mask_path):
             mask_np = np.load(mask_path)
             mask = torch.from_numpy(mask_np)
