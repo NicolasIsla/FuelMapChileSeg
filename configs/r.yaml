@@ -24,6 +24,7 @@ stratification_bins: 3 #  number of bins for stratified sampling, only for strat
 data_replicate: 1
 use_final_ckpt: false
 
+ann_dir: r
 
 defaults:
   - task: regression
@@ -34,6 +35,5 @@ defaults:
   - criterion: masked_huber_loss
   - lr_scheduler: multi_step_lr
   - optimizer: adamw
-  - ann_dir: H
 
   - _self_ 

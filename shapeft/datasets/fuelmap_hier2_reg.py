@@ -63,9 +63,8 @@ class FuelMap(RawGeoFMDataset):
         cover: int = 0,
         obj: str = "regression",
         # --- regression targets dirs (normalized) ---
-        ann_r_dir: str = "ANNOTATIONS_r_norm",
-        ann_h_dir: str = "ANNOTATIONS_H_norm",
-        ann_w_dir: str = "ANNOTATIONS_w_norm",
+        # --- regression targets dirs (normalized) ---
+        ann_dir: str = "r",
         mask_dir: str = "ANNOTATIONS_mask",
     ):
         super().__init__(
@@ -101,9 +100,7 @@ class FuelMap(RawGeoFMDataset):
         self.reference_date = datetime(*map(int, reference_date.split("-")))
 
         # target/mask folders (inside root_path)
-        self.ann_r_dir = ann_r_dir
-        self.ann_h_dir = ann_h_dir
-        self.ann_w_dir = ann_w_dir
+        self.ann= f"ANNOTATIONS_{ann_dir}_norm"
         self.mask_dir = mask_dir
 
         # metadata.geojson
@@ -164,40 +161,25 @@ class FuelMap(RawGeoFMDataset):
           r_norm, H_norm, w_norm as (H,W) each, stacks -> (3,H,W)
           mask as (H,W) 0/1
         """
-        r_path = os.path.join(self.root_path, self.ann_r_dir, f"{name}.npy")
-        h_path = os.path.join(self.root_path, self.ann_h_dir, f"{name}.npy")
-        w_path = os.path.join(self.root_path, self.ann_w_dir, f"{name}.npy")
-        #m_path = os.path.join(self.root_path, self.mask_dir,  f"{name}.npy")
+        reg_path = os.path.join(self.root_path, self.ann, f"{name}.npy")
+        m_path = os.path.join(self.root_path, self.mask_dir,  f"{name}.npy")
 
-        cls_path = os.path.join(self.root_path, f"ANNOTATIONS_class_hier2_{self.obj}", f"{name}.npy")
-        cls = np.load(cls_path)
-
-        if cls.ndim != 2:
-            raise ValueError(f"class ann expected (H,W), got {cls.shape} at {cls_path}")
-
-        # máscara: 1 solo donde cls != 0
-        mask = (cls != 0).astype(np.uint8)  # (H,W) {0,1}
-
-        r = np.load(r_path).astype(np.float32)
-        h = np.load(h_path).astype(np.float32)
-        w = np.load(w_path).astype(np.float32)
-        #mask = np.load(m_path)
+        reg = np.load(reg_path).astype(np.float32)
+        mask = np.load(m_path)
 
         if mask.ndim != 2:
-            raise ValueError(f"mask expected (H,W), got {mask.shape}")
+            raise ValueError(f"mask expected (H,W), got {mask.shape} at {m_path}")
 
         # enforce 0/1
         mask = (mask > 0).astype(np.uint8)
 
-        if r.shape != mask.shape or h.shape != mask.shape or w.shape != mask.shape:
+        if reg.shape != mask.shape:
             raise ValueError(
                 f"Target/mask shape mismatch for id={name}: "
-                f"r{r.shape} h{h.shape} w{w.shape} mask{mask.shape}"
+                f"r{reg.shape} mask{mask.shape}"
             )
 
-        target = np.stack([r, h, w], axis=0)  # (3,H,W)
-        target[:, mask == 0] = 0.0
-
+        target = np.stack([reg], axis=0)  # (1,H,W)
 
         target_t = torch.from_numpy(target).to(torch.float32)
         mask_t = torch.from_numpy(mask)  # uint8
@@ -257,18 +239,18 @@ class FuelMap(RawGeoFMDataset):
 
             s2_dates = output["S2_dates"]
             if len(s2_dates) > 0:
-                # align by the SAME indices as optical selection (defensive)
-                max_valid = min(len(s2_dates), optical_ts.shape[1])
-                metadata = s2_dates[:max_valid].to(torch.long)
-                if metadata.numel() != optical_ts.shape[1]:
-                    if metadata.numel() < optical_ts.shape[1]:
-                        pad = optical_ts.shape[1] - metadata.numel()
-                        metadata = torch.cat([metadata, metadata.new_full((pad,), int(metadata[-1]))])
-                    else:
-                        metadata = metadata[: optical_ts.shape[1]]
+                # alinear con los índices realmente usados
+                idx = optical_idx
+                idx = idx[idx < len(s2_dates)]  # clip defensivo
+                metadata = s2_dates[idx].to(torch.long)
+
+                # si por clipping quedó más corto que optical_ts, pad con último valor
+                if metadata.numel() < optical_ts.shape[1]:
+                    pad = optical_ts.shape[1] - metadata.numel()
+                    last = int(metadata[-1]) if metadata.numel() else 0
+                    metadata = torch.cat([metadata, metadata.new_full((pad,), last)])
             else:
                 metadata = torch.zeros((optical_ts.shape[1],), dtype=torch.long)
-
         elev = output["elevation"]
         mtpi = output["mTPI"]
         land = output["landforms"]

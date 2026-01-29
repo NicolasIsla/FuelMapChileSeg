@@ -238,15 +238,16 @@ class FuelMap(RawGeoFMDataset):
 
             s2_dates = output["S2_dates"]
             if len(s2_dates) > 0:
-                # align by the SAME indices as optical selection (defensive)
-                max_valid = min(len(s2_dates), optical_ts.shape[1])
-                metadata = s2_dates[:max_valid].to(torch.long)
-                if metadata.numel() != optical_ts.shape[1]:
-                    if metadata.numel() < optical_ts.shape[1]:
-                        pad = optical_ts.shape[1] - metadata.numel()
-                        metadata = torch.cat([metadata, metadata.new_full((pad,), int(metadata[-1]))])
-                    else:
-                        metadata = metadata[: optical_ts.shape[1]]
+                # alinear con los índices realmente usados
+                idx = optical_idx
+                idx = idx[idx < len(s2_dates)]  # clip defensivo
+                metadata = s2_dates[idx].to(torch.long)
+
+                # si por clipping quedó más corto que optical_ts, pad con último valor
+                if metadata.numel() < optical_ts.shape[1]:
+                    pad = optical_ts.shape[1] - metadata.numel()
+                    last = int(metadata[-1]) if metadata.numel() else 0
+                    metadata = torch.cat([metadata, metadata.new_full((pad,), last)])
             else:
                 metadata = torch.zeros((optical_ts.shape[1],), dtype=torch.long)
 
