@@ -373,7 +373,7 @@ def main(cfg: DictConfig) -> None:
     test_evaluator.save_logits = True
     test_evaluator.save_targets = True
     # create dir
-    pred_root = Path("/data/nisla/UTAE_results/regression_hier2_bn_r") / exp_dir.name   # mantiene el nombre del experimento
+    pred_root = Path("/data/nisla/UTAE_results/regression_hier2_dx_r") / exp_dir.name   # mantiene el nombre del experimento
     pred_dir = pred_root / "predictions_test" / f"rank{rank}"
     pred_dir.mkdir(parents=True, exist_ok=True)
 

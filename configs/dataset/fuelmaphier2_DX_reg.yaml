@@ -13,7 +13,7 @@ obj: dx           # consistent string
 
 
 ignore_index: 0          # not used in regression; mask is separate
-num_classes: 3
+num_classes: 1
 
 bands:
   optical:                 # make sure order matches your saved arrays
